@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata"
+	xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking"
+	xmlns:context="http://www.springframework.org/schema/context" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-current.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd">
+
+	<sub-flow name="common-initiation-subflow">
+        <set-variable variableName="messageID" value="#[java.util.UUID.randomUUID().toString().replace('-', '').substring(27)]" doc:name="Set Message ID" doc:description="This message ID is to follow a message within a specific application."/>
+        <choice doc:name="Set Correlation ID">
+            <when expression="#[message.inboundProperties.'http.listener.path' != null]">
+                <set-variable variableName="correlationID" value="#[message.inboundProperties.'X-Correlation-ID' != null ? message.inboundProperties.'X-Correlation-ID' : #[java.util.UUID.randomUUID().toString().replace('-', '').substring(22)]" doc:name="Set Correlation ID from HTTP Header"/>
+                <set-variable variableName="messageSource" value="API" doc:name="Set Message Source To API"/>
+            </when>
+            <when expression="#[message.inboundProperties.'CORRELATION_ID' != null]">
+                <set-variable variableName="correlationID" value="#[message.inboundProperties.'CORRELATION_ID']" doc:name="Set Correlation ID from JMS Property"/>
+                <set-variable variableName="messageSource" value="JMS" doc:name="Set Message Source to JMS"/>
+
+            </when>
+            <when expression="#[message.inboundProperties.'originalFilename' != null]">
+                <set-variable variableName="correlationID" value="#[java.util.UUID.randomUUID().toString().replace('-', '').substring(22)]-#[message.inboundProperties.'originalFilename']" doc:name="Generate Correlation ID For File"/>
+                <set-variable variableName="messageSource" value="File" doc:name="Set message source to File"/>
+            </when>
+            <when expression="#[flowVars.correlationID != null]">
+                <set-variable variableName="correlationID" value="#[flowVars.correlationID]" doc:name="Use Current Correlation ID"/>
+                <set-variable variableName="messageSource" value="Unknown" doc:name="Set Message Source to Unknown"/>
+            </when>
+            <otherwise>
+                <set-variable variableName="correlationID" value="#[java.util.UUID.randomUUID().toString().replace('-', '').substring(22)]" doc:name="Generate Correlation ID"/>
+                <set-variable variableName="messageSource" value="Unknown" doc:name="Set Message Source to Unknown"/>
+            </otherwise>
+        </choice>
+
+		<logger
+			message="#[flowVars.correlationID] #[flowVars.messageID]: Flow-&quot;#[flow.name]&quot; App-&quot;#[app.name]&quot; Environment-&quot;${mule.env}&quot; Server-&quot;#[server.host]&quot; Began"
+			level="INFO" doc:name="Log Initiation" />
+        <choice doc:name="Log Message Source Details">
+            <when expression="#[flowVars.messageSource == 'JMS']">
+                <logger message="#[flowVars.correlationID] #[flowVars.messageID]: Message picked up from ActiveMQ." level="INFO" doc:name="Log Inbound JMS Details"/>
+            </when>
+            <when expression="#[flowVars.messageSource == 'File']">
+                <logger message="#[flowVars.correlationID] #[flowVars.messageID]: File Picked Up - #[message.inboundProperties.'originalFilename']" level="INFO" doc:name="Log File Details"/>
+            </when>
+            <when expression="#[flowVars.messageSource == 'API']">
+                <logger message="#[flowVars.correlationID] #[flowVars.messageID]: Connnection Details - #[message.inboundProperties.'http.remote.address']  #[message.inboundProperties.'http.method' + message.inboundProperties.'http.relative.path']" level="INFO" doc:name="Log Connection Details"/>
+            </when>
+            <otherwise>
+                <logger message="#[flowVars.correlationID] #[flowVars.messageID]: Message Source not recognised in common flow." level="INFO" doc:name="Log Unknown Message Source"/>
+            </otherwise>
+        </choice>
+
+	</sub-flow>
+	<sub-flow name="common-completion-subflow">
+		<logger message="#[flowVars.correlationID] #[flowVars.messageID]: Completed."
+			level="INFO" doc:name="Log Completion" />
+		<message-properties-transformer
+			mimeType="application/json" doc:name="Prepare Outbound Properties">
+			<add-message-property key="Cache-control" value="no-store, no-cache" />
+			<add-message-property key="Content-Type" value="application/json" />
+			<add-message-property key="X-Do-Not-Track"
+				value="dnt" />
+			<delete-message-property key="MULE_*" />
+		</message-properties-transformer>
+	</sub-flow>
+	<sub-flow name="common-error-message-builder">
+		<logger
+			message="#[flowVars.correlationID] #[flowVars.messageID]: Error has occurred. Endpoint - #[message.outboundProperties.'MULE_ENDPOINT']"
+			level="INFO" doc:name="Log Error Occurred" />
+		<remove-property propertyName="*"
+			doc:name="Remove Outbound Properties" />
+		<set-variable variableName="exception"
+			value="#[flowVars.exception == null ? exception : flowVars.exception]"
+			doc:name="Set Exception Variable" />
+		<set-variable variableName="errorDescription"
+			value="#[flowVars.errorDescription != null ? flowVars.errorDescription : (flowVars.exception.cause.?message or flowVars.exception.cause)]"
+			doc:name="Set Error Description" />
+		<set-variable variableName="appName" value="#[app.name]"
+			doc:name="Set App Name" />
+		<set-variable variableName="serverName" value="#[server.host]"
+			doc:name="Server Name" />
+		<dw:transform-message doc:name="Build Error Message">
+			<dw:set-payload><![CDATA[%dw 1.0
+%output application/json encoding="UTF-8"
+---
+{
+	errorMessage: flowVars.errorMessage,
+	errorDescription: flowVars.errorDescription,
+	messageID: flowVars.messageID,
+	correlationID: flowVars.correlationID,
+	appName: flowVars.appName,
+	environment: p('mule.env'),
+	serverName: flowVars.serverName,
+	clusterName: 'TODO',//p(cluster.name),
+	timestamp: now
+}]]></dw:set-payload>
+		</dw:transform-message>
+		<logger
+			message="#[flowVars.correlationID] #[flowVars.messageID]: Error Payload - #['\n' + message.payloadAs(String)]"
+			level="ERROR" doc:name="Log Error Payload" />
+	</sub-flow>
+	
+	<sub-flow name="get-jms-inbound-correlation-message-ids-logsSub_Flow">
+		<message-properties-transformer scope="invocation"
+			doc:name="Flow Vars: correlationID, messageID">
+			<add-message-property key="correlationID"
+				value="#[message.inboundProperties.'CORRELATION_ID']" />
+			<add-message-property key="messageID"
+				value="#[message.inboundProperties.'MESSAGE_ID']" />
+		</message-properties-transformer>
+	</sub-flow>
+
+	<sub-flow name="set-jms-outbound-correlation-message-ids-logsSub_Flow">
+		<message-properties-transformer
+			doc:name="Setting Outbound Properties: CORRELATION_ID, MESSAGE_ID">
+			<add-message-property key="CORRELATION_ID"
+				value="#[flowVars.correlationID]" />
+			<add-message-property key="MESSAGE_ID"
+				value="#[flowVars.messageID]" />
+		</message-properties-transformer>
+	</sub-flow>
+	
+</mule>
