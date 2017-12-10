@@ -15,7 +15,7 @@ http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee
         <set-variable variableName="messageID" value="#[java.util.UUID.randomUUID().toString().replace('-', '').substring(27)]" doc:name="Set Message ID" doc:description="This message ID is to follow a message within a specific application."/>
         <choice doc:name="Set Correlation ID">
             <when expression="#[message.inboundProperties.'http.listener.path' != null]">
-                <set-variable variableName="correlationID" value="#[message.inboundProperties.'X-Correlation-ID' != null ? message.inboundProperties.'X-Correlation-ID' : #[java.util.UUID.randomUUID().toString().replace('-', '').substring(22)]" doc:name="Set Correlation ID from HTTP Header"/>
+                <set-variable variableName="correlationID" value="#[message.inboundProperties.'X-Correlation-ID' != null ? message.inboundProperties.'X-Correlation-ID' : java.util.UUID.randomUUID().toString().replace('-', '').substring(22)]" doc:name="Set Correlation ID from HTTP Header"/>
                 <set-variable variableName="messageSource" value="API" doc:name="Set Message Source To API"/>
             </when>
             <when expression="#[message.inboundProperties.'CORRELATION_ID' != null]">
